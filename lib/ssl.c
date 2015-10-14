@@ -22,6 +22,7 @@
 #include "private-libwebsockets.h"
 #ifndef USE_WOLFSSL
  #include <openssl/err.h>
+ #include <openssl/ssl.h>
 #endif
 
 int openssl_websocket_private_data_index;
@@ -83,6 +84,9 @@ lws_context_init_server_ssl(struct lws_context_creation_info *info,
 	SSL_METHOD *method;
 	int error;
 	int n;
+#if OPENSSL_VERSION_NUMBER >= 0x10000000L && OPENSSL_VERSION_NUMBER < 0x10002000L
+	EC_KEY *ecdh = NULL;
+#endif
 
 	if (info->port != CONTEXT_PORT_NO_LISTEN) {
 
@@ -142,6 +146,22 @@ lws_context_init_server_ssl(struct lws_context_creation_info *info,
 					      (char *)context->service_buffer));
 		return 1;
 	}
+
+	/* Set config for DH ciphers */
+#if OPENSSL_VERSION_NUMBER >= 0x10002000L
+	SSL_CTX_set_ecdh_auto(context->ssl_ctx, 1);
+#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
+	ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+	if(!ecdh){
+		error = ERR_get_error();
+		lwsl_err("unable to create TLS ECDH curve %lu: %s\n",
+			error, ERR_error_string(error,
+						(char *)context->service_buffer));
+		return 1;
+	}
+	SSL_CTX_set_tmp_ecdh(context->ssl_ctx, ecdh);
+	EC_KEY_free(ecdh);
+#endif
 
 	/* Disable SSLv2 and SSLv3 */
 	SSL_CTX_set_options(context->ssl_ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
